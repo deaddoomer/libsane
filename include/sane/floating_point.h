@@ -15,6 +15,14 @@ namespace SANE {
 
 namespace floating_point {
 
+#if defined(__i386__) || defined(__x86_64__) || defined(__m68k__)
+	// long double is float80 (ABI specific)
+	constexpr bool native_extended = sizeof(long double) >= 10;
+#else
+	// precission reduced down to double, but works everywhere
+	constexpr bool native_extended = false;
+#endif
+
 	template<size_t size>
 	void reverse_bytes(void *vp) {
 		char *cp = (char *)vp;
@@ -141,6 +149,14 @@ namespace floating_point {
 		void read(T x)
 		{ read(format<sizeof(x), endian::native>{}, &x); }
 
+		void read(long double x) {
+			if (native_extended) {
+				read(format<sizeof(x), endian::native>{}, &x);
+			} else {
+				read((double)x);
+			}
+		}
+
 		template<size_t size, endian byte_order>
 		void read(format<size, byte_order>, const void *vp) {
 
@@ -178,6 +194,16 @@ namespace floating_point {
 		template<class T, typename = std::enable_if<std::is_floating_point<T>::value> >
 		void write(T &x) const
 		{ write(format<sizeof(x), endian::native>{}, &x); }
+
+		void write(long double &x) const {
+			if (native_extended) {
+				write(format<sizeof(x), endian::native>{}, &x);
+			} else {
+				double tmp = x;
+				write(tmp);
+				x = tmp;
+			}
+		}
 
 		template<size_t size, endian byte_order>
 		void write(format<size, byte_order>, void *vp) const {
@@ -218,9 +244,15 @@ namespace floating_point {
 
 
 		explicit operator long double() const {
-			long double tmp;
-			write(tmp);
-			return tmp;
+			if (native_extended) {
+				long double tmp;
+				write(tmp);
+				return tmp;
+			} else {
+				double tmp;
+				write(tmp);
+				return tmp;
+			}
 		}
 		explicit operator double() const {
 			double tmp;
@@ -300,6 +332,10 @@ namespace floating_point {
 			fpi.read(f, vp);
 
 			return (return_type)fpi;
+		} else if (!native_extended) {
+			info fpi;
+			fpi.read(format<10, byte_order>{}, vp);
+			return (return_type)fpi;
 		} else {
 
 			constexpr size_t ssize = ldsize > size ? ldsize : size;
@@ -354,7 +390,7 @@ namespace floating_point {
 		constexpr size_t ssize = ldsize > size ? ldsize : size;
 		typename std::aligned_storage<ssize, alignof(return_type)>::type buffer[1];
 
-		if (ldsize == 8) {
+		if (ldsize == 8 || !native_extended) {
 			// do it manually.
 			info fpi;
 			fpi.read(x);
